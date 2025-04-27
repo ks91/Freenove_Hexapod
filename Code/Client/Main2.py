@@ -39,6 +39,7 @@ class ClientService:
         self.instruction_thread = None
         self.connected = False
         self.distance = '0cm'
+        self.power_value = [0, 0]
 
     def receive_instruction(self):
         try:
@@ -72,16 +73,13 @@ class ClientService:
                     self.client.tcp_flag=False
                     break
                 elif data[0]==cmd.CMD_SONIC:
-                    self.label_sonic.setText('Obstacle:'+data[1]+'cm')
+                    self.distance = f'{data[1]}cm'
                     #print('Obstacle:',data[1])
                 elif data[0]==cmd.CMD_POWER:
                     try:
                         if len(data)==3:
                             self.power_value[0] = data[1]
                             self.power_value[1] = data[2]
-                            #self.power_value[0] = self.restriction(round((float(data[1]) - 5.00) / 3.40 * 100),0,100)
-                            #self.power_value[1] = self.restriction(round((float(data[2]) - 7.00) / 1.40 * 100),0,100)
-                            #print('Power：',power_value1,power_value2)
                     except Exception as e:
                         print(e)
 
@@ -177,7 +175,8 @@ def get_speed():
     return jsonify({'speed': int(g.service.client.move_speed)}), 200
 
 
-# Endpoint to move
+# Endpoint to move or stop
+@app.route('/stop', methods=['POST'])
 @app.route('/move', methods=['POST'])
 @app.route('/move/<string:gait>/<string:x>/<string:y>/<string:angle>', methods=['POST'])
 def move(gait=None, x=None, y=None, angle=None):
@@ -189,23 +188,30 @@ def move(gait=None, x=None, y=None, angle=None):
     speed = g.service.client.move_speed
     command = cmd.CMD_MOVE + f'#{gait}#{x}#{y}#{speed}#{angle}\n'
     g.service.client.send_data(command)
-    return jsonify({'status': f'Moving [{gait}][{x}][{y}][{angle}]', 'speed': int(speed)}), 200
+    return jsonify({
+        'status': 'Moving',
+        'gait': int(gait),
+        'x': int(x),
+        'y': int(y),
+        'speed': int(speed),
+        'angle': int(angle)
+    }), 200
 
 
-# Endpoint for relax
-@app.route('/relax', methods=['POST'])
+# Endpoint to turn servo off
+@app.route('/servopower/off', methods=['POST'])
 def relax():
     command = cmd.CMD_SERVOPOWER + f'#0\n'
     g.service.client.send_data(command)
-    return jsonify({'status': 'Relaxed'}), 200
+    return jsonify({'status': 'Servo off'}), 200
 
 
-# Endpoint to stand
-@app.route('/stand', methods=['POST'])
+# Endpoint to turn servo on
+@app.route('/servopower/on', methods=['POST'])
 def stand():
     command = cmd.CMD_SERVOPOWER + f'#1\n'
     g.service.client.send_data(command)
-    return jsonify({'status': 'Stood'}), 200
+    return jsonify({'status': 'Servo on'}), 200
 
 
 # Endpoint to turn head vertically
@@ -213,7 +219,7 @@ def stand():
 @app.route('/head/vertical/<string:angle>', methods=['POST'])
 def head_vertical(angle=None):
     if angle is None:
-        angle = '0'
+        angle = '90'
     command = cmd.CMD_HEAD + f'#0#{angle}\n'
     g.service.client.send_data(command)
     return jsonify({'status': 'Head vertical angle set', 'angle': int(angle)}), 200
@@ -224,10 +230,129 @@ def head_vertical(angle=None):
 @app.route('/head/horizontal/<string:angle>', methods=['POST'])
 def head_horizontal(angle=None):
     if angle is None:
-        angle = '0'
+        angle = '90'
     command = cmd.CMD_HEAD + f'#1#{angle}\n'
     g.service.client.send_data(command)
     return jsonify({'status': 'Head horizontal angle set', 'angle': int(angle)}), 200
+
+
+# Endpoint for buzzer (state : '1' to turn on, '0' to turn off)
+@app.route('/buzzer', methods=['POST'])
+@app.route('/buzzer/<string:state>', methods=['POST'])
+def buzzer(state=None):
+    if state is None:
+        state = '0'
+    command = cmd.CMD_BUZZER + f'#{state}\n'
+    g.service.client.send_data(command)
+    return jsonify({'status': 'Buzzer state changed', 'state': state}), 200
+
+
+# Endpoint for balance (state : '1' to enable, '0' to disable)
+@app.route('/balance', methods=['POST'])
+@app.route('/balance/<string:state>', methods=['POST'])
+def balance(state=None):
+    if state is None:
+        state = '0'
+    command = cmd.CMD_BALANCE + f'#{state}\n'
+    g.service.client.send_data(command)
+    return jsonify({'status': 'Balance state changed', 'state': state}), 200
+
+
+# Endpoint for sonic
+@app.route('/sonic', methods=['GET'])
+def sonic():
+    command = cmd.CMD_SONIC + '\n'
+    g.service.client.send_data(command)
+    time.sleep(0.1)
+    distance = g.service.distance
+    return jsonify({'status': 'Sonic data requested', 'distance': distance}), 200
+
+
+# Endpoint for power
+@app.route('/power', methods=['GET'])
+def power():
+    command = cmd.CMD_POWER + '\n'
+    g.service.client.send_data(command)
+    time.sleep(0.1)
+    power_servo = g.service.power_value[0] + 'V'
+    power_rasp = g.service.power_value[1] + 'V'
+    return jsonify({
+        'status': 'Power data requested',
+        'power_servo': power_servo,
+        'power_rasp': power_rasp
+    }), 200
+
+
+# Endpoint to set position
+@app.route('/position', methods=['POST'])
+@app.route('/position/<string:x>/<string:y>/<string:z>', methods=['POST'])
+def set_height(x=None, y=None, z=None):
+    if x is None:
+        x = '0'
+        y = '0'
+        z = '0'
+    command = cmd.CMD_POSITION + f'#{x}#{y}#{z}\n'
+    g.service.client.send_data(command)
+    return jsonify({
+        'status': 'Position set',
+        'x': x,
+        'y': y,
+        'z': z
+    }), 200
+
+
+# Endpoint to set attitude (-20 <= values <= 20; 0 by default)
+@app.route('/attitude', methods=['POST'])
+@app.route('/attitude/<string:roll>/<string:pitch>/<string:yaw>', methods=['POST'])
+def set_attitude(roll=None, pitch=None, yaw=None):
+    if roll is None:
+        roll = '0'
+        pitch = '0'
+        yaw = '0'
+    command = cmd.CMD_ATTITUDE + f'#{roll}#{pitch}#{yaw}\n'
+    g.service.client.send_data(command)
+    return jsonify({
+        'status': 'Attitude set',
+        'roll': int(roll),
+        'pitch': int(pitch),
+        'yaw': int(yaw)
+    }), 200
+
+
+# Endpoint to set LED mode (0 : off, 1 to 5)
+@app.route('/led/mode', methods=['POST'])
+@app.route('/led/mode/<string:value>', methods=['POST'])
+def set_led_mode(value=None):
+    if value is None:
+        value = '0'
+    command = cmd.CMD_LED_MOD + f'#{value}\n'
+    g.service.client.send_data(command)
+    return jsonify({'status': 'LED mode set', 'mode': int(value)}), 200
+
+
+# Endpoint to set LED color
+@app.route('/led/color', methods=['POST'])
+@app.route('/led/color/<string:red>/<string:green>/<string:blue>', methods=['POST'])
+def set_led_color(red=None, green=None, blue=None):
+    if red is None:
+        red = '255'
+        green = '255'
+        blue = '255'
+    command = cmd.CMD_LED + f'#255#{red}#{green}#{blue}\n'
+    g.service.client.send_data(command)
+    return jsonify({
+        'status': 'LED color set',
+        'r': int(red),
+        'g': int(green),
+        'b': int(blue)
+    }), 200
+
+
+# Endpoint to get image from camera
+@app.route('/camera/image', methods=['GET'])
+def get_image():
+    cv2.imwrite(FILENAME_IMAGE, g.service.client.image)
+    return send_file(FILENAME_IMAGE, mimetype='image/jpeg')
 
 
 @app.errorhandler(400)
