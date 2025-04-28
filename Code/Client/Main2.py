@@ -176,6 +176,10 @@ def get_speed():
 
 
 # Endpoint to move or stop
+# gait : 1 - three legs at a time, 2 - one leg at a time
+# x and y : step length : should be around -30 to 30 (30 is quite fast moving)
+# angle : should be around -20 to 20 (20 is quite fast moving)
+# if both x and y are 0, it stops, so just to turn (counter)clockwise, x or y needs to be 1
 @app.route('/stop', methods=['POST'])
 @app.route('/move', methods=['POST'])
 @app.route('/move/<string:gait>/<string:x>/<string:y>/<string:angle>', methods=['POST'])
@@ -214,7 +218,7 @@ def stand():
     return jsonify({'status': 'Servo on'}), 200
 
 
-# Endpoint to turn head vertically
+# Endpoint to turn head vertically (60 <= angle <= 180; 90 (straight) by default)
 @app.route('/head/vertical', methods=['POST'])
 @app.route('/head/vertical/<string:angle>', methods=['POST'])
 def head_vertical(angle=None):
@@ -225,7 +229,7 @@ def head_vertical(angle=None):
     return jsonify({'status': 'Head vertical angle set', 'angle': int(angle)}), 200
 
 
-# Endpoint to turn head horizontally
+# Endpoint to turn head horizontally (0 <= angle <= 180; 90 (straight) by default)
 @app.route('/head/horizontal', methods=['POST'])
 @app.route('/head/horizontal/<string:angle>', methods=['POST'])
 def head_horizontal(angle=None):
@@ -268,7 +272,7 @@ def sonic():
     return jsonify({'status': 'Sonic data requested', 'distance': distance}), 200
 
 
-# Endpoint for power
+# Endpoint for power (if they are full, more than 8V)
 @app.route('/power', methods=['GET'])
 def power():
     command = cmd.CMD_POWER + '\n'
@@ -283,7 +287,7 @@ def power():
     }), 200
 
 
-# Endpoint to set position
+# Endpoint to set position (should be around -10 <= values <= 10; 0 by default)
 @app.route('/position', methods=['POST'])
 @app.route('/position/<string:x>/<string:y>/<string:z>', methods=['POST'])
 def set_height(x=None, y=None, z=None):
@@ -301,7 +305,7 @@ def set_height(x=None, y=None, z=None):
     }), 200
 
 
-# Endpoint to set attitude (-20 <= values <= 20; 0 by default)
+# Endpoint to set attitude (should be around -10 <= values <= 10; 0 by default)
 @app.route('/attitude', methods=['POST'])
 @app.route('/attitude/<string:roll>/<string:pitch>/<string:yaw>', methods=['POST'])
 def set_attitude(roll=None, pitch=None, yaw=None):
@@ -330,7 +334,7 @@ def set_led_mode(value=None):
     return jsonify({'status': 'LED mode set', 'mode': int(value)}), 200
 
 
-# Endpoint to set LED color
+# Endpoint to set LED color (200 is too bright)
 @app.route('/led/color', methods=['POST'])
 @app.route('/led/color/<string:red>/<string:green>/<string:blue>', methods=['POST'])
 def set_led_color(red=None, green=None, blue=None):
@@ -338,7 +342,7 @@ def set_led_color(red=None, green=None, blue=None):
         red = '255'
         green = '255'
         blue = '255'
-    command = cmd.CMD_LED + f'#255#{red}#{green}#{blue}\n'
+    command = cmd.CMD_LED + f'#{red}#{green}#{blue}\n'
     g.service.client.send_data(command)
     return jsonify({
         'status': 'LED color set',
