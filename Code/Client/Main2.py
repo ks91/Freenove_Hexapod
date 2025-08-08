@@ -38,6 +38,8 @@ class ClientService:
         self.video_timer_thread = None
         self.instruction_thread = None
         self.connected = False
+        self.looking_for_ball = False
+        self.tracking_ball = False
         self.distance = '0cm'
         self.power_value = [0, 0]
 
@@ -90,7 +92,65 @@ class ClientService:
             if self.client.video_flag == False:
                 self.client.video_flag = True
             time.sleep(0.1)
+            
+            # ball tracking adopted and modified from
+            # https://github.com/Freenove/Freenove_Robot_Dog_Kit_for_Raspberry_Pi
+            if self.looking_for_ball:
+                MIN_RADIUS=7
+                #red
+                THRESHOLD_LOW = (0, 180, 180)
+                THRESHOLD_HIGH = (5,255,255)
 
+                img_filter = cv2.GaussianBlur(self.client.image.copy(), (3, 3), 0)
+                img_filter = cv2.cvtColor(img_filter, cv2.COLOR_BGR2HSV)
+                img_binary = cv2.inRange(img_filter.copy(), THRESHOLD_LOW, THRESHOLD_HIGH)
+                img_binary = cv2.dilate(img_binary, None, iterations = 1)
+                contours = cv2.findContours(img_binary.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[-2]
+                center = None
+                radius = 0
+                if len(contours) > 0:
+                    c = max(contours, key=cv2.contourArea)
+                    ((x, y), radius) = cv2.minEnclosingCircle(c)
+                    M = cv2.moments(c)
+                    if M["m00"] > 0:
+                        center = (int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"]))
+                        if radius < MIN_RADIUS:
+                            center = None
+                
+                speed = self.client.move_speed
+                self.tracking_ball = True
+                if center != None:
+                    cv2.circle(self.client.image, center, int(radius), (0, 255, 0))
+                    D=round(2700/(2*radius))  #CM
+                    x=self.client.pid.PID_compute(center[0])
+                    d=self.client.pid.PID_compute(D)
+                    print(f'd={d}, x={x}, r={radius}')
+                    if radius>7:
+                        angle = 0
+                        if x < 180:
+                            angle = -4 if x < 180 else -2
+                        elif x > 310:
+                            angle = 4 if x > 340 else 2
+                        if d < 45: # backward
+                                step = -8 if d < 35 else -4
+                                command=cmd.CMD_MOVE + f'#1#0#{step}#{speed}#{angle}\n'
+                                self.client.send_data(command)
+                        elif d > 70: # forward
+                                step = 8 if d > 80 else 4
+                                command=cmd.CMD_MOVE + f'#1#0#{step}#{speed}#{angle}\n'
+                                self.client.send_data(command)
+                        else:
+                            if angle != 0:
+                                command=cmd.CMD_MOVE + f'#1#0#-1#{speed}#{angle}\n'
+                                self.client.send_data(command)
+                            else:
+                                command=cmd.CMD_MOVE + f'#1#0#0#{speed}#0\n'
+                                self.client.send_data(command)
+                                self.tracking_ball = False
+                else:
+                    command=cmd.CMD_MOVE + f'#1#0#0#{speed}#0\n'
+                    self.client.send_data(command)
+                    #print (command)
 
 def abort_by_bad_content_type(content_type):
     abort(400, description='Content-Type {0} is not expected'.format(
@@ -189,6 +249,7 @@ def move(gait=None, x=None, y=None, angle=None):
         x = '0'
         y = '0'
         angle = '0'
+    g.service.looking_for_ball = False
     speed = g.service.client.move_speed
     command = cmd.CMD_MOVE + f'#{gait}#{x}#{y}#{speed}#{angle}\n'
     g.service.client.send_data(command)
@@ -205,6 +266,7 @@ def move(gait=None, x=None, y=None, angle=None):
 # Endpoint to turn servo off
 @app.route('/servopower/off', methods=['POST'])
 def relax():
+    g.service.looking_for_ball = False
     command = cmd.CMD_SERVOPOWER + f'#0\n'
     g.service.client.send_data(command)
     return jsonify({'status': 'Servo off'}), 200
@@ -357,6 +419,41 @@ def set_led_color(red=None, green=None, blue=None):
 def get_image():
     cv2.imwrite(FILENAME_IMAGE, g.service.client.image)
     return send_file(FILENAME_IMAGE, mimetype='image/jpeg')
+
+
+# Endpoint to enter ball tracking
+@app.route('/ball/start', methods=['POST'])
+def start_ball_tracking():
+    command = cmd.CMD_HEAD + '#0#90\n'
+    g.service.client.send_data(command)
+    command = cmd.CMD_HEAD + '#1#90\n'
+    g.service.client.send_data(command)
+    g.service.looking_for_ball = True
+    return jsonify({'status': 'Ball-tracking started'}), 200
+
+
+# Endpoint to exit ball tracking
+@app.route('/ball/stop', methods=['POST'])
+def stop_ball_tracking():
+    g.service.looking_for_ball = False
+    time.sleep(0.2)
+    command=cmd.CMD_MOVE + f'#1#0#0#{g.service.client.move_speed}#0\n'
+    g.service.client.send_data(command)
+    return jsonify({'status': 'Ball-tracking stopped'}), 200
+
+
+# Endpoint to check the state of ball tracking
+@app.route('/ball/state', methods=['GET'])
+def get_ball_tracking_state():
+    state = ''
+    if g.service.looking_for_ball:
+        if g.service.tracking_ball:
+            state = 'ongoing'
+        else:
+            state = 'completed'
+    else:
+        state = 'not tracking'
+    return jsonify({'status': state}), 200
 
 
 @app.errorhandler(400)
