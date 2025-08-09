@@ -11,6 +11,7 @@ the original Main.py client software.
 
 from flask import Flask, request, jsonify, g, send_file
 from Client import *
+from PID import *
 import threading
 import time
 
@@ -42,6 +43,10 @@ class ClientService:
         self.tracking_ball = False
         self.distance = '0cm'
         self.power_value = [0, 0]
+        self.pid_x = Incremental_PID(P=0.05, I=0.005, D=0.02)
+        self.pid_distance = Incremental_PID(P=0.3, I=0.05, D=0.05)
+        self.pid_x.setPoint = 180 # center x coordinate
+        self.pid_distance.setPoint = 60 # target distance (not cm)
 
     def receive_instruction(self):
         try:
@@ -122,31 +127,16 @@ class ClientService:
                 if center != None:
                     cv2.circle(self.client.image, center, int(radius), (0, 255, 0))
                     D=round(2700/(2*radius))  #CM
-                    x=self.client.pid.PID_compute(center[0])
-                    d=self.client.pid.PID_compute(D)
-                    print(f'd={d}, x={x}, r={radius}')
-                    if radius>7:
-                        angle = 0
-                        if x < 180:
-                            angle = -4 if x < 180 else -2
-                        elif x > 310:
-                            angle = 4 if x > 340 else 2
-                        if d < 45: # backward
-                                step = -8 if d < 35 else -4
-                                command=cmd.CMD_MOVE + f'#1#0#{step}#{speed}#{angle}\n'
-                                self.client.send_data(command)
-                        elif d > 70: # forward
-                                step = 8 if d > 80 else 4
-                                command=cmd.CMD_MOVE + f'#1#0#{step}#{speed}#{angle}\n'
-                                self.client.send_data(command)
-                        else:
-                            if angle != 0:
-                                command=cmd.CMD_MOVE + f'#1#0#-1#{speed}#{angle}\n'
-                                self.client.send_data(command)
-                            else:
-                                command=cmd.CMD_MOVE + f'#1#0#0#{speed}#0\n'
-                                self.client.send_data(command)
-                                self.tracking_ball = False
+                    angle_out = self.pid_x.PID_compute(center[0])
+                    step_out = self.pid_distance.PID_compute(D)
+                    angle = max(-10, min(10, int(angle_out)))
+                    step = max(-15, min(15, int(step_out)))
+                    print(f'center_x={center[0]}, D={D}, angle={angle_out}, step={step_out}')
+                    if radius > 7:
+                        command=cmd.CMD_MOVE + f'#1#0#{step}#{speed}#{angle}\n'
+                        self.client.send_data(command)
+                        if step == 0 and angle == 0:
+                            self.tracking_ball = False
                 else:
                     command=cmd.CMD_MOVE + f'#1#0#0#{speed}#0\n'
                     self.client.send_data(command)
